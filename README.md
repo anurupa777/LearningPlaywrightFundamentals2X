@@ -2,6 +2,8 @@
 
 A hands-on starter project for learning [Playwright](https://playwright.dev/) end-to-end testing with TypeScript. Part of **The Testing Academy** Playwright Fundamentals course.
 
+This fork is synced from `PramodDutta/LearningPlaywrightFundamentals2X` and maintained at `anurupa777/LearningPlaywrightFundamentals2X`.
+
 ## Tech Stack
 
 - [Playwright Test](https://playwright.dev/docs/intro) `^1.61.1`
@@ -26,23 +28,35 @@ cp .env.example .env
 # then edit .env and add your own VWO_USER / VWO_PASS
 ```
 
+On Windows PowerShell, if `npm.ps1` or `npx.ps1` is blocked by execution policy, use `npm.cmd` and `npx.cmd` instead.
+
 ## Running Tests
 
 ```bash
 # Run all tests (headless)
-npx playwright test
+npm run test
 
 # Run in headed mode (watch the browser)
-npx playwright test --headed
+npm run test:headed
 
 # Run a single spec
 npx playwright test tests/example.spec.ts
 
 # Run in UI mode (interactive)
-npx playwright test --ui
+npm run test:ui
 
 # Debug a test
-npx playwright test --debug
+npm run test:debug
+```
+
+Windows-friendly equivalents:
+
+```powershell
+npm.cmd run test
+npm.cmd run test:headed
+npx.cmd playwright test tests/example.spec.ts
+npm.cmd run test:ui
+npm.cmd run test:debug
 ```
 
 ## Viewing the Report
@@ -65,7 +79,7 @@ The report updates live *while* tests run — leave it open in a browser tab and
 .
 ├── tests/
 │   ├── 01_Basics/                    # Test anatomy, annotations (skip/only/fail/slow)
-│   ├── 02_First_tests/               # Browser → Context → Page (BCP) hierarchy
+│   ├── 02_first_tests/               # Browser → Context → Page (BCP) hierarchy
 │   ├── 03_Locators_Commands/         # Lazy locators, strict mode, auto-wait, built-ins
 │   ├── 04_Session_Storage/           # storageState: log in once, reuse the session
 │   ├── 05_Allure_Reporting/          # Custom TTA HTML reporter + test.step
@@ -153,7 +167,7 @@ test("two users interact", async ({ browser }) => {
 });
 ```
 
-Context options (`viewport`, `locale`, `timezoneId`, `geolocation`, or a full device profile like `userAgent` + `isMobile` for mobile emulation) are passed into `browser.newContext({...})`, see [`237_BCP_Test_Options.spec.ts`](tests/02_First_tests/237_BCP_Test_Options.spec.ts).
+Context options (`viewport`, `locale`, `timezoneId`, `geolocation`, or a full device profile like `userAgent` + `isMobile` for mobile emulation) are passed into `browser.newContext({...})`, see [`237_BCP_Test_Options.spec.ts`](tests/02_first_tests/237_BCP_Test_Options.spec.ts).
 
 ### 03 - Locators & Commands
 
