@@ -2,8 +2,6 @@
 
 A hands-on starter project for learning [Playwright](https://playwright.dev/) end-to-end testing with TypeScript. Part of **The Testing Academy** Playwright Fundamentals course.
 
-This fork is synced from `PramodDutta/LearningPlaywrightFundamentals2X` and maintained at `anurupa777/LearningPlaywrightFundamentals2X`.
-
 ## Tech Stack
 
 - [Playwright Test](https://playwright.dev/docs/intro) `^1.61.1`
@@ -28,35 +26,23 @@ cp .env.example .env
 # then edit .env and add your own VWO_USER / VWO_PASS
 ```
 
-On Windows PowerShell, if `npm.ps1` or `npx.ps1` is blocked by execution policy, use `npm.cmd` and `npx.cmd` instead.
-
 ## Running Tests
 
 ```bash
-# Run all tests (headless)
-npm run test
+# Run all tests (headed, per playwright.config.ts)
+npx playwright test
 
-# Run in headed mode (watch the browser)
-npm run test:headed
+# Explicitly run in headed mode (watch the browser)
+npx playwright test --headed
 
 # Run a single spec
 npx playwright test tests/example.spec.ts
 
 # Run in UI mode (interactive)
-npm run test:ui
+npx playwright test --ui
 
 # Debug a test
-npm run test:debug
-```
-
-Windows-friendly equivalents:
-
-```powershell
-npm.cmd run test
-npm.cmd run test:headed
-npx.cmd playwright test tests/example.spec.ts
-npm.cmd run test:ui
-npm.cmd run test:debug
+npx playwright test --debug
 ```
 
 ## Viewing the Report
@@ -79,13 +65,14 @@ The report updates live *while* tests run — leave it open in a browser tab and
 .
 ├── tests/
 │   ├── 01_Basics/                    # Test anatomy, annotations (skip/only/fail/slow)
-│   ├── 02_first_tests/               # Browser → Context → Page (BCP) hierarchy
+│   ├── 02_First_tests/               # Browser → Context → Page (BCP) hierarchy
 │   ├── 03_Locators_Commands/         # Lazy locators, strict mode, auto-wait, built-ins
 │   ├── 04_Session_Storage/           # storageState: log in once, reuse the session
 │   ├── 05_Allure_Reporting/          # Custom TTA HTML reporter + test.step
 │   ├── 06_Multiple_Element_/         # allInnerTexts / all() loops, getByTestId
-│   ├── 07_WebTables/                 # Dynamic XPath + structured row extraction
-│   ├── 08_… … 23_Advance_Framework/  # Curriculum modules (scaffolded, WIP)
+│   ├── 07_WebTables/                 # Dynamic XPath, filter()/:has() row targeting, pagination
+│   ├── 08_Web_Select_Frames_Iframe/  # Native, custom, multi-select, tag-style & async dropdowns
+│   ├── 09_… … 23_Advance_Framework/  # Remaining curriculum modules (scaffolded, WIP)
 │   ├── Template.spec.ts              # Empty spec scaffold, copy for new tests
 │   └── example.spec.ts               # Sample: title check + "Get started" navigation
 ├── utils/
@@ -167,7 +154,7 @@ test("two users interact", async ({ browser }) => {
 });
 ```
 
-Context options (`viewport`, `locale`, `timezoneId`, `geolocation`, or a full device profile like `userAgent` + `isMobile` for mobile emulation) are passed into `browser.newContext({...})`, see [`237_BCP_Test_Options.spec.ts`](tests/02_first_tests/237_BCP_Test_Options.spec.ts).
+Context options (`viewport`, `locale`, `timezoneId`, `geolocation`, or a full device profile like `userAgent` + `isMobile` for mobile emulation) are passed into `browser.newContext({...})`, see [`237_BCP_Test_Options.spec.ts`](tests/02_First_tests/237_BCP_Test_Options.spec.ts).
 
 ### 03 - Locators & Commands
 
@@ -471,6 +458,206 @@ for (let i = 0; i < await rowLoc.count(); i++) {
     console.log(`Row ${i + 1}:`, await rowLoc.nth(i).locator('td').allInnerTexts());
 }
 ```
+
+#### 07.1 - Row Targeting: `filter()`, XPath Axes & `:has()`
+
+**Concept:** three ways to pin one row (or one element) out of many identical ones: chain `.filter({ hasText })` onto a collection locator, jump between cells with XPath axes (`preceding-sibling::td`), or select a row by its content with the CSS `:has()` pseudo-class (`tr:has(td:text('...'))`).
+
+**Why:** table rows and list items share identical markup, the only thing that distinguishes "Rohan Mehta's row" from the rest is its *content*, so the selector must anchor on text and then navigate to the sibling cell you actually want to act on.
+
+**Q&A: why use this?**
+- **Q: `filter({ hasText })` vs XPath axes?** A: `filter()` narrows a `Locator[]` by contained text and stays chainable/readable; XPath axes (`preceding-sibling`, `following-sibling`) shine when you must hop *sideways* from the matched cell, e.g. from a name `<td>` to the checkbox `<td>` before it.
+- **Q: What does `tr:has(td:text('Rohan.Mehta'))` mean?** A: "the `<tr>` that *contains* a `<td>` with that exact text", `:has()` selects the parent by its child, the CSS equivalent of an XPath ancestor hop.
+- **Q: Why chain `.locator('td').first()` after the row match?** A: The row locator resolves to one `<tr>` with many `<td>` children, chaining scopes the search inside that row, and `.first()` picks a single cell so strict mode doesn't throw.
+
+```mermaid
+flowchart TD
+    S[Many identical rows] --> Q{How to pin one?}
+    Q -->|by contained text| F["locator&#40;'tr'&#41;.filter&#40;{hasText}&#41;"]
+    Q -->|hop to sibling cell| X["//td[text&#40;&#41;='name']/preceding-sibling::td/input"]
+    Q -->|CSS parent-by-child| H["tr:has&#40;td:text&#40;'name'&#41;&#41;"]
+    F --> A[Act on cell inside row]
+    X --> A
+    H --> A
+```
+
+```ts
+await page.goto('https://app.thetestingacademy.com/playwright/webtable');
+
+// XPath axis: from the name cell, hop back to the checkbox cell before it
+await page.locator(
+    "//td[text()='Aarav.Sharma']/preceding-sibling::td/input[@type='checkbox']"
+).click();
+
+// CSS :has(): select the row that contains the matching cell, then scope inside it
+await page
+    .locator("tr:has(td:text('Rohan.Mehta'))")
+    .locator("td")
+    .first()
+    .click();
+
+// filter(): same idea on any repeated collection
+const forgottenPasswordLink = page.locator('a.list-group-item')
+    .filter({ hasText: 'Forgotten Password' });
+await forgottenPasswordLink.click();
+```
+
+#### 07.2 - Paginated Tables (Search Across Pages)
+
+**Concept:** when a table is paginated, the row you want may not be in the DOM at all, only the current page's rows exist. Two strategies: **search-until-found** (filter for the row, if absent click `next-page`, repeat until found or the button disables) or **sweep-all-pages** (loop `page-1..N` testids and collect every page's cells into one array). Extract the loop into a helper (`findRowByName(page, name): Promise<Locator>`) once two specs need it.
+
+**Why:** a plain `locator().filter()` silently matches zero rows when the target lives on page 3, pagination forces you to *drive the UI* to bring the row into the DOM before you can read it.
+
+**Q&A: why use this?**
+- **Q: How does the search loop terminate?** A: Two exits: `row.count() > 0` (found, break) or `next.isDisabled()` (last page reached, throw "Row not found!"), without the disabled check it spins forever.
+- **Q: Why `row.count()` instead of `expect(row).toBeVisible()`?** A: `count()` returns immediately with the current match total (0 is a valid answer to branch on); `toBeVisible()` would *wait* and fail the test when the row simply isn't on this page yet.
+- **Q: When extract the helper function?** A: The second time a spec needs "find row by name across pages", return the row `Locator` (not extracted values) so each caller reads whatever cells it wants: `row.locator('td[data-col="email"]')`.
+
+```mermaid
+flowchart TD
+    S[goto table page 1] --> C{"row.filter&#40;{hasText: name}&#41;.count&#40;&#41; > 0?"}
+    C -->|Yes| R[Return row Locator]
+    C -->|No| D{next-page disabled?}
+    D -->|Yes| E[Throw: Row not found]
+    D -->|No| N[Click next-page] --> C
+    R --> V["read td[data-col='email'] / 'country'"]
+```
+
+```ts
+async function findRowByName(page: Page, name: string): Promise<Locator> {
+    while (true) {
+        const row = page.locator('#employees-tbody tr').filter({ hasText: name });
+        if (await row.count()) return row;
+
+        const next = page.getByTestId('next-page');
+        if (await next.isDisabled()) throw new Error(`Row not found: ${name}`);
+        await next.click();
+    }
+}
+
+test('find employee across pages', async ({ page }) => {
+    await page.goto('https://app.thetestingacademy.com/playwright/tables/webtable');
+    const row = await findRowByName(page, 'Luca Greco');
+    const email = await row.locator('td[data-col="email"]').innerText();
+    const country = await row.locator('td[data-col="country"]').innerText();
+    console.log(email, country);
+});
+
+// Sweep variant: collect a column from every page
+const allEmails: string[] = [];
+for (let p = 1; p <= 3; p++) {
+    await page.getByTestId(`page-${p}`).click();
+    allEmails.push(...await page
+        .locator('#employees-tbody tr td[data-col="email"]')
+        .allInnerTexts());
+}
+```
+
+| | Search-until-found | Sweep-all-pages |
+|:--|:--|:--|
+| Goal | one specific row | whole column/dataset |
+| Stops | on match or last page | after fixed page count |
+| Cost | early exit, usually fast | always visits every page |
+| Spec | `256` / `258` (helper fn) | `257` |
+
+### 08 - Select Boxes & Custom Dropdowns
+
+**Concept:** native HTML `<select>` elements expose their options directly to Playwright through `selectOption()`. Custom dropdowns (including React Select-style controls) are regular buttons, inputs, listboxes, and options, so you open the trigger and interact with the rendered option by role, text, or test id.
+
+**Why:** the two controls can look identical in the browser but require different automation strategies. `selectOption()` is concise and reliable for a real `<select>`; it cannot operate a JavaScript-built dropdown that has no `<select>` element.
+
+**Q&A: why use this?**
+- **Q: How can I tell whether to use `selectOption()`?** A: Inspect the element. Use it when the control is a real `<select>` with `<option>` children; otherwise click the custom trigger and select an option from the popup.
+- **Q: Can `selectOption()` choose in more than one way?** A: Yes. A string can match an option's value or label (`'Option 2'`); you can also be explicit with `{ value: '2' }`, `{ label: 'Option 2' }`, or a zero-based index such as `{ index: 2 }`. The method returns the selected values.
+- **Q: Why prefer `getByRole('option', { name })` in a custom dropdown?** A: It describes the user-visible choice and remains stable when the component's generated classes or internal markup change.
+
+```mermaid
+flowchart TD
+    C[Dropdown control] --> Q{Real select element?}
+    Q -->|Yes| N[selectOption by value, label, or index]
+    Q -->|No| T[Click custom trigger]
+    T --> O[Locate visible option by role or text]
+    O --> S[Click option]
+    N --> A[Assert selected value]
+    S --> A
+```
+
+```ts
+// Native <select>
+await page.goto('https://the-internet.herokuapp.com/dropdown');
+await page.locator('#dropdown').selectOption('Option 2');
+await expect(page.locator('#dropdown')).toHaveValue('2');
+
+// Custom dropdown: trigger + rendered option
+await page.goto('https://app.thetestingacademy.com/playwright/tables/dropdowns');
+await page.getByTestId('lang-trigger').click();
+await page.getByRole('option', { name: 'JavaScript' }).click();
+
+await page.getByTestId('experience-trigger').click();
+await page.getByText('Mid-level (4-6 years)', { exact: true }).click();
+```
+
+#### 08.1 - React Select: Single, Multi & Tag-Style Controls
+
+**Concept:** React Select-style widgets render a trigger/input plus a popup menu instead of a native `<select>`. A single-select replaces its current choice, while multi-select and tag-style controls keep each choice as a removable chip. Press `Escape` after multi-selection when you need to dismiss the open menu before moving on.
+
+**Why:** component libraries often generate dynamic class names and nested markup. Stable ids and user-facing text keep the test focused on behavior, while keyboard actions provide a reliable way to dismiss an open menu before continuing.
+
+**Q&A: why use this?**
+- **Q: Why use `{ exact: true }` for multi-select options?** A: It prevents a short label such as `JUnit` or `security` from also matching a larger text node that contains the same word.
+- **Q: How do I add several options?** A: Keep the multi-select menu open, click each exact option, then press `Escape` when selection is complete.
+- **Q: How are existing tags selected?** A: Open the tag-style control and click each exact visible option, just like a multi-select.
+
+```ts
+await page.goto('https://app.thetestingacademy.com/playwright/tables/select-boxes');
+
+// Single selection
+await page.locator('#rs-single').click();
+await page.getByText('Cypress', { exact: true }).click();
+
+// Multiple selections become chips
+await page.locator('#rs-multi').click();
+await page.getByText('Pytest', { exact: true }).click();
+await page.getByText('JUnit', { exact: true }).click();
+await page.keyboard.press('Escape');
+
+// Select existing choices in the creatable multi-select
+await page.locator('#rs-creatable').click();
+await page.getByText('api-testing', { exact: true }).click();
+await page.getByText('security', { exact: true }).click();
+await page.keyboard.press('Escape');
+```
+
+#### 08.2 - Async Search Dropdowns
+
+**Concept:** an async dropdown loads or filters options only after the user types. Fill the component's input, assert that the result menu contains the expected option, and then select it by its accessible role and name.
+
+**Why:** immediately clicking a result races the network/render cycle. A web-first assertion on the menu synchronizes the test with the UI without a hard-coded timeout.
+
+```mermaid
+flowchart LR
+    O[Open async dropdown] --> I[Fill search input]
+    I --> L[Options load or filter]
+    L --> E{Expected text visible?}
+    E -->|Yes| C[Click option by role]
+    E -->|Not yet| E
+```
+
+```ts
+await page.locator('#rs-async').click();
+await page.getByTestId('rs-async-input').fill('pun');
+
+const menu = page.getByTestId('rs-async-menu');
+await expect(menu).toContainText('Pune');
+await page.getByRole('option', { name: 'Pune' }).click();
+```
+
+| Control | DOM pattern | Playwright approach | Covered in |
+|:--|:--|:--|:--|
+| Native select | `<select>` + `<option>` | `selectOption()` | `259` |
+| Custom dropdown | trigger + listbox/options | click trigger, then visible option | `260` |
+| React Select single/multi/tag-style | generated input, menu, chips | stable id/text + keyboard | `261` |
+| Async select | search input + delayed menu | fill, web-first assert, click option | `261` |
 
 ## Configuration Highlights
 
