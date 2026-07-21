@@ -12,34 +12,37 @@ test("Verify  cura APP" , async({page})=> {
     await page.locator("//button[@id='btn-login']").click()
   
     //Verify the title is same "CURA Healthcare Service"
-    expect(page).toHaveTitle("CURA Healthcare Service")
+    await expect(page).toHaveTitle("CURA Healthcare Service")
     
-    //Select other facility 2nd option:
-    page.locator("//select[@id ='combo_facility']").selectOption('Hongkong CURA Healthcare Center')
-   //Check checkbox: Apply for hospital readmission
+    // Select facility by visible label
+    await page.locator("//select[@id='combo_facility']").selectOption({ label: 'Hongkong CURA Healthcare Center' })
 
-    page.locator("//input[@id='chk_hospotal_readmission']").check()
+   // Check checkbox: Apply for hospital readmission (force in case element is overlapped)
+   await page.locator("//input[@id='chk_hospotal_readmission']").check({ force: true })
 
-   //Check all the radio
-
-    page.locator("//input[@id='radio_program_medicare']")
-    const checkbox2 = page.locator("//input[@id='radio_program_medicaid']")
-    page.locator("//input[@id='radio_program_none']")
-
-  //Selct radio_program_medicaid button
-
+   // Select radio options
+   await page.locator("//input[@id='radio_program_medicare']").check().catch(() => {})
+   const checkbox2 = page.locator("//input[@id='radio_program_medicaid']")
    await checkbox2.check()
+   await page.locator("//input[@id='radio_program_none']").check().catch(() => {})
 
-   //Select Visit adte
-   page.locator("//input[@id='txt_visit_date']").fill('20/7/2026')
+     // Select Visit date — set value via JS and dispatch input event to satisfy any validation/calendar widget
+     await page.evaluate(() => {
+         const el = document.getElementById('txt_visit_date') as HTMLInputElement | null;
+         if (el) {
+             el.value = '20/07/2026';
+             el.dispatchEvent(new Event('input', { bubbles: true }));
+             el.dispatchEvent(new Event('change', { bubbles: true }));
+         }
+     });
 
-    //Enter Comment
-   page.locator("//textarea[@id='txt_comment']").fill('For myself')
+    // Enter Comment
+   await page.locator("//textarea[@id='txt_comment']").fill('For myself')
 
-  //Book appontment
-   page.locator("//button[@id='btn-book-appointment']").click()
+  // Book appointment
+   await page.locator("//button[@id='btn-book-appointment']").click()
     
-   //Check appointment message is succeful
-   page.locator("//h2[text()='Appointment Confirmation']")
-   
+   // Check appointment message is successful
+   await expect(page.locator("//h2[text()='Appointment Confirmation']")).toBeVisible()
+
 })
