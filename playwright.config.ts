@@ -35,8 +35,8 @@ export default defineConfig({
     trace: 'on',
     headless: false,
     screenshot: 'on',
-    video: 'off',
-    viewport: { width: 3400, height: 2300 }
+    video: 'on',
+    viewport: { width: 1920, height: 1080 },
 
   },
 
@@ -44,7 +44,10 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1920, height: 1080 },
+      },
     },
 
     // {
