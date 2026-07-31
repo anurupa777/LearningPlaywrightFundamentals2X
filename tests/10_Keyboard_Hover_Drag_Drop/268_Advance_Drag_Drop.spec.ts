@@ -8,6 +8,7 @@ test('Drag and Drop', async ({ page }) => {
     // await page.pause();
 
     await page.locator('#card-review-pr-21').dragTo(page.locator('[data-status="in-progress"]'));
+
     await page.locator('#card-review-pr-21').dragTo(page.locator('[data-status="review"]'));
 
 
