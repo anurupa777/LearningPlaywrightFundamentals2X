@@ -41,6 +41,10 @@ npx playwright test tests/example.spec.ts
 # Run in UI mode (interactive)
 npx playwright test --ui
 
+# Run by priority tag (module 18)
+npm run test:p1          # only @p1
+npm run test:priority    # @p1, then @p2, then @p3
+
 # Debug a test
 npx playwright test --debug
 ```
@@ -78,7 +82,14 @@ The report updates live *while* tests run — leave it open in a browser tab and
 │   ├── 12_Handle_SVG/                # svg locator, shape/chart clicks, SVG map path attributes
 │   ├── 13_Shadow_DOM/                # Shadow-piercing locators, nested shadow roots
 │   ├── 14_FileUpload/                # setInputFiles: disk paths, Buffers, multi-file
-│   ├── 15_… … 23_Advance_Framework/  # Remaining curriculum modules (scaffolded, WIP)
+│   ├── 15_File_Download/             # waitForEvent('download'), saveAs, suggestedFilename
+│   ├── 16_Scroll_toElement/          # scrollIntoViewIfNeeded, window.scrollBy/scrollTo, lazy lists
+│   ├── 17_Expect_Assertions/         # Value vs locator assertions, soft assertions, negation
+│   ├── 18_Test_hooks/                # Hooks, modifiers, describe modes, tags & priority runs
+│   ├── 19_Data_Driven_Testing/       # DDT from JSON, CSV, YAML, MySQL & Excel (.xlsx)
+│   │   ├── test-data/                # login.json, *.csv, *.yml, *.sql, *.xlsx fixtures
+│   │   └── util/                     # csvReader, yamlReader, dbReader, excelReader
+│   ├── 20_… … 23_Advance_Framework/  # Remaining curriculum modules (scaffolded, WIP)
 │   ├── Template.spec.ts              # Empty spec scaffold, copy for new tests
 │   └── example.spec.ts               # Sample: title check + "Get started" navigation
 ├── utils/
@@ -1025,6 +1036,320 @@ await expect(items).toContainText(['file1', 'file2']);               // substrin
 | Array semantics | same count, exact per item | subset, substring per item |
 | Use when | text fully controlled | dynamic prefix/suffix |
 
+### 15 - File Download
+
+**Concept:** a download is an **event**, not a locator. Wrap the click that triggers it in `Promise.all([page.waitForEvent('download'), click])`, then use the returned `Download` object: `suggestedFilename()` gives the server-proposed name, `saveAs(path)` copies the file where you want it, `path()` returns Playwright's temp copy.
+
+**Why:** Playwright streams every download into a temp folder that is deleted when the browser context closes. Without `saveAs`, there is nothing left to assert on after the test.
+
+**Q&A — why use this?**
+- **Q: Why `Promise.all` instead of clicking first, then waiting?** A: the download can start before your `waitForEvent` subscribes, and the event would be missed. Register the listener first, resolve both together.
+- **Q: Where does the file go if I never call `saveAs`?** A: a temp path (`download.path()`), auto-deleted on context close. `saveAs` is what makes it persist.
+- **Q: Why does `saveAs('out/')` not work?** A: it takes a **full file path**, not a directory. Join it yourself: `path.join('out', download.suggestedFilename())`. Missing parent folders are created for you.
+
+```mermaid
+sequenceDiagram
+    participant T as Test
+    participant P as Page
+    participant B as Browser
+    T->>P: Promise.all([waitForEvent('download'), click()])
+    P->>B: click download button
+    B-->>T: Download object (streamed to temp)
+    T->>T: suggestedFilename() → "sample-download.txt"
+    T->>T: saveAs(path.join('out', name))
+    T->>T: expect(fs.existsSync(filePath)).toBeTruthy()
+```
+
+```ts
+import { test, expect } from '@playwright/test';
+import path from 'path';
+import fs from 'fs';
+
+test('download the static file and save it', async ({ page }) => {
+    await page.goto('https://app.thetestingacademy.com/playwright/widgets/upload-download');
+
+    const [download] = await Promise.all([
+        page.waitForEvent('download'),
+        page.getByTestId('download-static').click(),
+    ]);
+
+    const filePath = path.join('out', download.suggestedFilename());
+    await download.saveAs(filePath);
+
+    expect(fs.existsSync(filePath)).toBeTruthy();
+});
+```
+
+| | `download.path()` | `download.saveAs(file)` |
+|:--|:--|:--|
+| Location | Playwright temp dir | your chosen path |
+| Survives context close | no | yes |
+| Use for | quick read inside the test | artifacts, content assertions after the run |
+
+> `out/` is gitignored — downloaded files are run artifacts, not fixtures. A stale root-owned file there makes `saveAs` fail with `EACCES`; delete it rather than chasing the test.
+
+### 16 - Scroll to Element
+
+**Concept:** `locator.scrollIntoViewIfNeeded()` scrolls an element into the viewport, and every action (`click`, `fill`, `check`) already does it automatically. Reach for explicit scrolling only when the *scroll itself* is the trigger: lazy-loaded lists, infinite feeds, sticky-header offsets. For page-level jumps use `page.evaluate(() => window.scrollBy(0, 1000))` or `window.scrollTo(0, document.body.scrollHeight)`.
+
+**Why:** lazy content does not exist in the DOM until the user scrolls near it. No wait or assertion will ever make it appear — you must reproduce the scroll that fires the app's IntersectionObserver.
+
+**Q&A — why use this?**
+- **Q: Do I need to scroll before clicking?** A: No. Playwright auto-scrolls as part of actionability. Explicit scrolling is for lazy-load triggers and screenshots, not for reachability.
+- **Q: `scrollIntoViewIfNeeded` or `page.evaluate(window.scrollTo)`?** A: the locator API when you target an element (it waits for the element first); `evaluate` when you want raw pixel/page-level movement with no element in mind.
+- **Q: How do I assert content that appears *after* the scroll?** A: `expect.poll(() => list.count()).toBeGreaterThan(initialCount)` — it retries the count until new items land, unlike a one-shot `expect(await list.count())`.
+
+```mermaid
+flowchart TD
+    Q{Why are you scrolling?} -->|Just to click/fill| A[Do nothing — auto-scroll handles it]
+    Q -->|Trigger lazy load| B["locator.scrollIntoViewIfNeeded&#40;&#41;"]
+    Q -->|Move the page itself| C["page.evaluate&#40;() => window.scrollBy&#40;0, 1000&#41;&#41;"]
+    Q -->|Jump to the very bottom| D["window.scrollTo&#40;0, document.body.scrollHeight&#41;"]
+    B --> E[IntersectionObserver fires, new items render]
+    E --> F["expect.poll&#40;() => list.count&#40;&#41;&#41;.toBeGreaterThan&#40;initial&#41;"]
+```
+
+```ts
+await page.goto('https://app.thetestingacademy.com/playwright/widgets/scroll');
+
+// 1) let Playwright do the scrolling for an element
+await page.getByTestId('deep-anchor').scrollIntoViewIfNeeded();
+
+// 2) raw page scrolling
+await page.evaluate(() => window.scrollBy(0, 1000));
+await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+
+// 3) lazy list: scroll the last rendered item into view, then poll until more items render
+const list = page.getByTestId('lazy-list').locator('li');
+const initialCount = await list.count();
+await list.last().scrollIntoViewIfNeeded();   // nth(10) would hang — item 11 does not exist yet
+
+await expect.poll(async () => list.count(), {
+    message: 'expected items > 10',
+    timeout: 10_000,
+}).toBeGreaterThan(initialCount);
+```
+
+| | `scrollIntoViewIfNeeded()` | `page.evaluate(window.scrollTo/By)` |
+|:--|:--|:--|
+| Target | a locator (waits for it) | the page/window |
+| Waits for element | yes | no |
+| Best for | lazy triggers, screenshots of an element | bottom-of-page jumps, pixel offsets |
+
+### 17 - Expect Assertions
+
+**Concept:** Playwright ships two kinds of `expect`. **Value assertions** (`toBe`, `toEqual`, `toBeTruthy`) compare plain JS values synchronously. **Locator assertions** (`toBeVisible`, `toHaveText`, `toHaveCount`) are web-first: they poll the live DOM until the condition holds or the timeout expires, so they must be `await`-ed.
+
+**Why:** a one-shot `expect(await el.isVisible()).toBe(true)` reads the DOM once and fails on any render delay. `await expect(el).toBeVisible()` retries for you and kills that entire class of flake.
+
+**Q&A — why use this?**
+- **Q: When do I `await` an expect?** A: whenever the subject is a Locator, Page, or APIResponse. Never for raw numbers, strings, or objects.
+- **Q: What does `expect.soft` buy me?** A: it records the failure and keeps going, so one run reports every broken assertion instead of stopping at the first. The test still ends up failed.
+- **Q: Why does `.not.toBeChecked()` pass on a box I just checked?** A: a missing `await` on `check()`. The assertion polls and passes on its *first* poll, before the click lands. Always await actions.
+
+```mermaid
+flowchart TD
+    Q{What is the subject?} -->|number / string / object| V[Value assertion — synchronous, no await]
+    Q -->|Locator / Page / APIResponse| L[Web-first assertion — MUST await]
+    L --> P[Polls DOM every ~100ms]
+    P -->|condition true| Pass[✅ pass]
+    P -->|timeout hit| Fail[❌ fail with call log]
+    L --> S{Need every failure in one run?}
+    S -->|yes| Soft["expect.soft&#40;locator&#41; — records, continues"]
+    S -->|no| Hard["expect&#40;locator&#41; — stops the test"]
+```
+
+```ts
+// value assertions — synchronous
+expect(1 + 2).toBe(3);
+expect({ age: 20, role: 'admin' }).toEqual({ role: 'admin', age: 20 });
+
+// locator assertions — awaited, auto-retrying
+const email = page.getByRole('textbox', { name: 'Email Address' });
+await expect(email).toHaveAttribute('type', 'email');
+await expect(page.locator('footer a')).toHaveCount(16);
+
+// soft: each line records its own failure, the test keeps running
+const firstName = page.getByTestId('first-name');
+await expect.soft(firstName).toHaveAttribute('id', 'first-name');
+await expect.soft(firstName).toHaveValue('');
+
+// hard + negation
+await expect(firstName).toBeEnabled();
+await expect(page.locator('#error')).not.toBeVisible();
+```
+
+Full API reference: [`283_Expect.cheatsheet.md`](tests/17_Expect_Assertions/283_Expect.cheatsheet.md).
+
+| | `expect()` (hard) | `expect.soft()` |
+|:--|:--|:--|
+| On failure | throws, test stops immediately | records, test continues |
+| Final verdict | failed | failed (all soft errors reported) |
+| Best for | preconditions the rest depends on | independent field-by-field checks |
+
+### 18 - Test Hooks, Modifiers & Priority
+
+**Concept:** the `test` object carries the whole run-control surface: lifecycle hooks (`beforeAll` / `beforeEach` / `afterEach` / `afterAll`), modifiers (`skip`, `fixme`, `fail`, `slow`, `setTimeout`), suite modes (`describe.serial`, `describe.parallel`, `describe.configure`), and tag-based selection via `--grep`.
+
+**Why:** setup that lives inside each test gets copy-pasted and drifts. Hooks put it in one place, and modifiers let you quarantine a broken test (`fixme`) or a known-failing one (`fail`) without deleting it or leaving the suite red.
+
+**Q&A — why use this?**
+- **Q: `beforeAll` per test or per file?** A: once per *worker*, not per test. If the worker restarts (crash or retry), it runs again.
+- **Q: `skip` vs `fixme` vs `fail`?** A: `skip` = not applicable here (wrong browser/env). `fixme` = broken, do not run. `fail` = must fail; if it passes, the test is reported as failed.
+- **Q: How do I run only the critical tests?** A: tag titles with `@p1 @smoke` and run `npx playwright test --grep @p1` (wired up as `npm run test:p1`).
+
+```mermaid
+flowchart TD
+    A["beforeAll — once per worker"] --> B["beforeEach — fresh page"]
+    B --> C[Test 1]
+    C --> D[afterEach — screenshot on failure]
+    D --> E["beforeEach — fresh page"]
+    E --> F[Test 2]
+    F --> G[afterEach]
+    G --> H["afterAll — teardown"]
+    style A fill:#ecfdf5,stroke:#059669
+    style H fill:#fef2f2,stroke:#ef4444
+```
+
+```ts
+test.beforeAll(async () => console.log('server is up'));          // once per worker
+
+test.beforeEach(async ({ page }) => {                             // before every test
+    await page.goto('https://app.thetestingacademy.com/playwright/');
+});
+
+test('title test', async ({ page, browserName }) => {
+    test.skip(browserName === 'firefox', 'not supported on Firefox');
+    await expect(page).toHaveTitle(/Playwright/);
+});
+
+test.fixme('broken in Safari, fix me', async ({ page }) => { /* never runs */ });
+
+test('expected to fail until backend ships', async ({ page }) => {
+    test.fail();                                                  // passing here = reported failure
+    await expect(page.getByText('New customer area')).toBeVisible();
+});
+
+test.afterEach(async ({ page }, testInfo) => {                    // runs even when the test failed
+    if (testInfo.status !== testInfo.expectedStatus) {
+        await page.screenshot({ path: `out/fail-${testInfo.title}.png`, fullPage: true });
+    }
+});
+
+test.afterAll(async () => console.log('tear down'));
+```
+
+Ordering and tag runs:
+
+```ts
+test.describe.serial('Checkout — must run in order', () => {      // stops at the first failure
+    test('open landing', async () => {});
+    test('add to cart', async () => {});
+});
+
+test.describe.configure({ mode: 'serial' });                      // file-level mode switch
+test('Login test @p1 @smoke', async ({ page }) => {});            // npx playwright test --grep @p1
+```
+
+```bash
+npm run test:p1         # only @p1
+npm run test:priority   # @p1, then @p2, then @p3
+```
+
+Full API tables: [`286_Test_Hook_Cheatsheet.md`](tests/18_Test_hooks/286_Test_Hook_Cheatsheet.md).
+Chrome launch flags for these runs: [`285_Chrome_Arg_List.md`](tests/18_Test_hooks/285_Chrome_Arg_List.md).
+
+| Modifier | Runs? | Reported as |
+|:--|:--|:--|
+| `test.skip()` | no | skipped |
+| `test.fixme()` | no | skipped (known broken) |
+| `test.fail()` | yes | passes only if it fails |
+| `test.slow()` | yes | timeout x3 |
+
+### 19 - Data Driven Testing (JSON, CSV, YAML, MySQL, Excel)
+
+**Concept:** data-driven testing (DDT) keeps one test body and feeds it many rows of data from an external source — a JSON array, a CSV, a YAML list, a MySQL table, or an Excel sheet — so adding a case means adding a row, not a test.
+
+**Why:** copy-pasting the same login test five times with different credentials means five places to fix when a locator changes. One loop over a data file means one.
+
+**Q&A — why use this?**
+- **Q: Where does the loop go — inside or outside `test()`?** A: outside. `for (const row of data) test(...)` creates one *real* test per row, so each gets its own retry, trace and report line. A loop inside a single test hides failures behind the first one.
+- **Q: Why can't MySQL and `.xlsx` use that pattern?** A: Playwright collects tests **synchronously**, and both readers are async. `fs.readFileSync` (JSON/CSV/YAML) returns rows in time; `mysql2` and `exceljs` do not. Those specs load rows in `beforeAll` and run each row as a `test.step`.
+- **Q: How do I keep DB tests from breaking a laptop with no MySQL?** A: gate the suite — `test.skip(!process.env.MYSQL_HOST, '...')` inside `beforeAll`. No DB configured → suite skips, run stays green.
+
+```mermaid
+flowchart TD
+    A{How is the data read?} -->|"Sync — fs.readFileSync"| B["JSON / CSV / YAML"]
+    A -->|"Async — mysql2 / exceljs"| C["MySQL table / .xlsx sheet"]
+    B --> D["Rows ready at collection time"]
+    D --> E["for (row of rows) test(...)<br/>one test per row"]
+    C --> F["Rows arrive in beforeAll"]
+    F --> G["one test + test.step per row"]
+    E --> H["Same test body, mapped to LoginRow"]
+    G --> H
+    style B fill:#ecfdf5,stroke:#059669
+    style C fill:#fff7ed,stroke:#f59e0b
+    style H fill:#eff6ff,stroke:#3b82f6
+```
+
+**Sync sources — one `test()` per row** (`297_DDT_CSV`, `298_JSON_DDT`, `299_DDT_YAML`):
+
+```ts
+import { readYAML, LoginRow } from './util/yamlReader';
+
+// read at module scope, BEFORE Playwright collects tests
+const loginData = readYAML<LoginRow>(path.join(__dirname, 'test-data/login-data.yml'));
+
+for (const data of loginData) {
+    test(`Login with : ${data.description}`, async ({ page }) => {
+        await page.getByRole('textbox', { name: 'Email Address' }).fill(data.username);
+        await page.getByRole('textbox', { name: 'Password' }).fill(data.password);
+        await page.getByRole('button', { name: 'Login to Practice Account' }).click();
+    });
+}
+```
+
+**Async sources — `beforeAll` + `test.step` per row** (`300_DDT_MySQL`, `301_DDT_XLSX`):
+
+```ts
+let loginData: LoginRow[] = [];
+
+test.beforeAll(async () => {
+    test.skip(!isDbConfigured(), 'MYSQL_HOST not set, skipping MySQL DDT');
+    loginData = await readLoginDataFromDB();      // SELECT ... FROM login_data
+});
+
+test('Login with data from MySQL login_data table', async ({ page }) => {
+    for (const data of loginData) {
+        await test.step(`Login with : ${data.description}`, async () => {
+            await page.goto('https://app.thetestingacademy.com/playwright/multiple_element_filter');
+            await page.getByRole('textbox', { name: 'Email Address' }).fill(data.username);
+            await page.getByRole('textbox', { name: 'Password' }).fill(data.password);
+        });
+    }
+});
+```
+
+Every reader maps its source onto the same `LoginRow` shape (`description`, `username`, `password`, `shouldPass`, `expectedError`), so the test body never changes when the source does — only the import line.
+
+| Source | Reader | Sync? | Test granularity | Setup |
+|:--|:--|:--:|:--|:--|
+| JSON | `import data from './x.json'` | ✅ | one `test()` per row | none |
+| CSV | [`util/csvReader.ts`](tests/19_Data_Driven_Testing/util/csvReader.ts) | ✅ | one `test()` per row | none |
+| YAML | [`util/yamlReader.ts`](tests/19_Data_Driven_Testing/util/yamlReader.ts) | ✅ | one `test()` per row | `js-yaml` |
+| MySQL | [`util/dbReader.ts`](tests/19_Data_Driven_Testing/util/dbReader.ts) | ❌ | `test.step` per row | `mysql2` + `.env` + [`login-data.sql`](tests/19_Data_Driven_Testing/test-data/login-data.sql) |
+| Excel `.xlsx` | [`util/excelReader.ts`](tests/19_Data_Driven_Testing/util/excelReader.ts) | ❌ | `test.step` per row | `exceljs` + `node util/generateExcel.js` |
+
+```bash
+# seed the MySQL table once
+mysql -u root -p < tests/19_Data_Driven_Testing/test-data/login-data.sql
+
+# regenerate the Excel fixture from code (keeps the binary reviewable)
+node tests/19_Data_Driven_Testing/util/generateExcel.js
+```
+
+MySQL credentials come from `.env` — `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`. Leave `MYSQL_HOST` unset and module 19's DB spec skips itself.
+
 ## Configuration Highlights
 
 Defined in `playwright.config.ts`:
@@ -1034,7 +1359,8 @@ Defined in `playwright.config.ts`:
 - `fullyParallel: false` — test files run serially (dialed back from parallel while module 12's Flipkart-hosted spec is under active development)
 - `reporter: [["line"], ["./utils/CustomReporter.ts"]]` — terminal progress + the custom TTA HTML report (module 05)
 - `trace: 'on'`, `screenshot: 'on'`, `video: 'on'` — full debug artifacts for every run (heavier, dial back for CI)
-- `headless: false`, `viewport: null` + `launchOptions.args: ['--start-maximized']` — browser opens maximized to the real screen size instead of a fixed viewport
+- `headless: false`, `viewport: { width: 1920, height: 1080 }` — browser opens visibly at a fixed full-HD viewport
+- `launchOptions.args: ['--incognito']` — see [`285_Chrome_Arg_List.md`](tests/18_Test_hooks/285_Chrome_Arg_List.md); every Playwright test already gets an isolated context, so this flag is demonstrative
 - Projects: Chromium active; Firefox and WebKit currently commented out
 - CI-aware retries and workers (`process.env.CI`)
 
